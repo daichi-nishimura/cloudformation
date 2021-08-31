@@ -5,65 +5,140 @@ Parameters:
     Type: "AWS::EC2::KeyPair::KeyName"
 
 Resources:
-  MyVPC:
+  VPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
       Tags:
         - Key: Name
-          Value: VPC-cfn
+          Value: VPC-CFn
 
-  MyIGW:
+  IGW:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: IGW-cfn
+          Value: IGW-CFn
 
-
-  MyAttachGateway:
+  InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      VpcId: !Ref MyVPC
-      InternetGatewayId: !Ref MyIGW
-
-  MyPubSub:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref IGW
+  #サブネット
+  PubSub1:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: ap-northeast-1a
-      VpcId: !Ref MyVPC
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+      Tags:
+        - Key: Name
+          Value: PubSub1-CFn
+
+  PubSub2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref VPC
       CidrBlock: 10.0.1.0/24
       Tags:
         - Key: Name
-          Value: PubSub-cfn
+          Value: PubSub2-CFn
 
-  MyPubSubRT:
-    Type: AWS::EC2::RouteTable
+  PriSub1:
+    Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref MyVPC
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
       Tags:
         - Key: Name
-          Value: RT-cfn
+          Value: PriSub1-CFn
 
-  PubSubToInternet:
-    Type: AWS::EC2::Route
+  PriSub2:
+    Type: AWS::EC2::Subnet
     Properties:
-      RouteTableId: !Ref MyPubSubRT
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref MyIGW
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      Tags:
+        - Key: Name
+          Value: PriSub2-CFn
 
-  MyPubSubRTAssociation:
+  #NAT
+  NatGatewayEIP:        
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties: 
+     Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PubSub1
+
+  #ルート
+  PubSubRT:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PubSubRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PubSubRT
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  PubSub1RTAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref MyPubSub
-      RouteTableId: !Ref MyPubSubRT
+      SubnetId: !Ref PubSub1
+      RouteTableId: !Ref PubSubRT
 
-  MyEC2SG:
+  PubSub2RTAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSub2
+      RouteTableId: !Ref PubSubRT
+   
+  PriSubRT:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PriSub-RT
+
+  PriSubRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PriSubRT
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PriSub1RTAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PriSub1
+      RouteTableId: !Ref PriSubRT  
+
+  PriSub2RTAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PriSub2
+      RouteTableId: !Ref PriSubRT    
+
+  #セキュリティーグループ   
+  EC2SG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: ec2-sg-cfn
-      GroupDescription: Allow SSH and HTTP access only MyIP
-      VpcId: !Ref MyVPC
+      GroupName: EC2-SG-CFn
+      VpcId: !Ref VPC
+      GroupDescription: This Security Group is for my studying of AWS
       SecurityGroupIngress:
         # http
         - IpProtocol: tcp
@@ -75,15 +150,34 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
-          
+       # Railsのアプリケーションサーバー用
         - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
+          FromPort: 3000
+          ToPort: 3000
           CidrIp: 0.0.0.0/0
-          Description: For Jenkins
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EC2-SG
+
+  RDSSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Study AWS RDS
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref EC2SG
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: RDS-SG
 
   EC2a: 
     Type: AWS::EC2::Instance
@@ -94,27 +188,13 @@ Resources:
       NetworkInterfaces: 
         - AssociatePublicIpAddress: "true"
           DeviceIndex: "0"
-          SubnetId: !Ref MyPubSub
+          SubnetId: !Ref PubSub1
           GroupSet:
-            - !Ref MyEC2SG
-      
-      UserData:
-        Fn::Base64: |
-          #!/bin/bash
-          sudo yum update -y
-          sudo amazon-linux-extras install -y ansible2
-          sudo yum install -y java-1.8.0-openjdk-devel.x86_64
-          sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat/jenkins.repo
-          sudo rpm --import https://pkg.jenkins.io/redhat/jenkins.io.key
-          sudo yum install -y jenkins git
-          sudo service jenkins start
+            - !Ref EC2SG
       Tags:
           - Key: Name
             Value: EC2a
-
-
-
-
+      
   EC2b: 
     Type: AWS::EC2::Instance
     Properties: 
@@ -124,12 +204,45 @@ Resources:
       NetworkInterfaces: 
         - AssociatePublicIpAddress: "true"
           DeviceIndex: "0"
-          SubnetId: !Ref MyPubSub
+          SubnetId: !Ref PubSub2
           GroupSet:
-            - !Ref MyEC2SG
+            - !Ref EC2SG
       Tags:
-          - Key: Name
-            Value: EC2b
+         - Key: Name
+           Value: EC2b
+  #RDS
+  RDS:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: RDSCFn
+      Port: 3306
+      Engine: MySQL
+      MasterUsername: root
+      DBInstanceClass: db.t2.micro
+      AvailabilityZone: ap-northeast-1a
+      VPCSecurityGroups:
+        - !Ref RDSSG
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      AllocatedStorage: 20
+      MasterUserPassword: Daichi1228
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: This DBSubnet Group is for my studying of AWS
+      SubnetIds: 
+        - !Ref PriSub1
+        - !Ref PriSub2  
+
+  ELB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ELB-CFn
+      SecurityGroups:
+        - !Ref EC2SG
+      Subnets:
+        - !Ref PubSub1
+        - !Ref PubSub2
 
 
   
