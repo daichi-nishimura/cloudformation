@@ -25,7 +25,8 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref IGW
-  #サブネット
+
+  #SubNet
   PubSub1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -67,19 +68,32 @@ Resources:
           Value: PriSub2-CFn
 
   #NAT
-  NatGatewayEIP:        
+  NatGateway1EIP:        
     Type: AWS::EC2::EIP
     DependsOn: InternetGatewayAttachment
     Properties: 
      Domain: vpc
 
-  NatGateway:
+  NatGateway2EIP: 
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
       SubnetId: !Ref PubSub1
 
-  #ルート
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PubSub2
+
+
+  #Route
   PubSubRT:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -105,40 +119,56 @@ Resources:
       SubnetId: !Ref PubSub2
       RouteTableId: !Ref PubSubRT
    
-  PriSubRT:
+  PriSubRT1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: PriSub-RT
+          Value: PriSub-RT1
 
-  PriSubRoute:
+  PriSubRT2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PriSub-RT2
+
+  PriSubRoute1:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PriSubRT
+      RouteTableId: !Ref PriSubRT1
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway
+      NatGatewayId: !Ref NatGateway1
+
+
+  PriSubRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PriSubRT2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
 
   PriSub1RTAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PriSub1
-      RouteTableId: !Ref PriSubRT  
+      RouteTableId: !Ref PriSubRT1
 
   PriSub2RTAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PriSub2
-      RouteTableId: !Ref PriSubRT    
+      RouteTableId: !Ref PriSubRT2 
 
-  #セキュリティーグループ   
+  #SecurityGroup
   EC2SG:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: EC2-SG-CFn
       VpcId: !Ref VPC
-      GroupDescription: This Security Group is for my studying of AWS
+      GroupDescription: SecurityGroup of EC2
       SecurityGroupIngress:
         # http
         - IpProtocol: tcp
@@ -150,23 +180,26 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
-       # Railsのアプリケーションサーバー用
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
-          CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
+  
+  ALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: SecurityGroup of ALB
       Tags:
         - Key: Name
-          Value: EC2-SG
+          Value: ALB-SG
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
 
   RDSSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
       VpcId: !Ref VPC
-      GroupDescription: Study AWS RDS
+      GroupDescription: SecurityGroup of RDS
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 3306
@@ -179,6 +212,7 @@ Resources:
         - Key: Name
           Value: RDS-SG
 
+  #EC2
   EC2a: 
     Type: AWS::EC2::Instance
     Properties: 
@@ -224,28 +258,65 @@ Resources:
         - !Ref RDSSG
       DBSubnetGroupName: !Ref RDSSubnetGroup
       AllocatedStorage: 20
-      MasterUserPassword: Daichi1228
+      MasterUserPassword: password
 
   RDSSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupDescription: This DBSubnet Group is for my studying of AWS
+      DBSubnetGroupDescription:  SubnetGroup of RDS
       SubnetIds: 
         - !Ref PriSub1
         - !Ref PriSub2  
 
-  ELB:
+  #ALB
+  TargetGroup: 
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 10
+      Matcher: 
+        HttpCode: 200
+      Tags: 
+        - Key: Name
+          Value: ALB-TargetGroup
+      
+      Targets: 
+        - Id: !Ref EC2a
+        - Id: !Ref EC2b
+          Port: 80
+
+  InternetALB: 
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: ELB-CFn
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: ALB-Internet
+      Scheme: internet-facing
+  
       SecurityGroups:
-        - !Ref EC2SG
-      Subnets:
+        - !Ref ALBSG
+      Subnets: 
         - !Ref PubSub1
         - !Ref PubSub2
 
-
-  
+  ALBListener: 
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref InternetALB
+      Port: 80
+      Protocol: HTTP
+ 
 
   
 
