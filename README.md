@@ -1,2 +1,2 @@
 # cloudformation
-<img alt=”AWS構成図” src=”file:///Users/daichi/AWS%E6%A7%8B%E6%88%90%E5%9B%B3.html” />
+![AWS構成図](file:///Users/daichi/%E5%90%8D%E7%A7%B0%E6%9C%AA%E8%A8%AD%E5%AE%9A.html)
